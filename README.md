@@ -20,7 +20,7 @@ In YAML code, the `${EnvironmentName}` would be substituted with `UdacityProject
 ```
 ./create.sh server ./server/config.yml ./server/params.json
 ```
-**Notes**: You can change `udagram` to other name. 
+**Notes**: You can change `network`, `server` to other name. 
 
 3. Delete server
 ```
