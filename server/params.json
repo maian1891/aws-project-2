@@ -1,0 +1,14 @@
+[
+    {
+        "ParameterKey": "EnvironmentName",
+        "ParameterValue": "Anmt2-Aws-Cloud-Project-2"
+    },
+    {
+        "ParameterKey": "InstanceType",
+        "ParameterValue": "t2.medium"
+    },
+    {
+        "ParameterKey": "Ami",
+        "ParameterValue": "ami-004dac467bb041dc7"
+    }
+]

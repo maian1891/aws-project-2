@@ -1,0 +1,183 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: Deploy a High-Availability Web App using CloudFormation Udacity Project
+
+Parameters:
+  EnvironmentName:
+    Description: An Environment name that will be prefixed to resources
+    Type: String
+
+  InstanceType:
+    Description: Instance type
+    Type: String
+    Default: t3.medium
+
+  Ami:
+    Type: String
+    Default: ami-004dac467bb041dc7 #Ubuntu Server 22.04 LTS
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+
+  # Instance Profile
+  S3AllowOnly:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: "S3AllowOnly"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "s3:*"
+                Resource:
+                  - !Sub arn:aws:s3:::${S3Bucket}/*
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref S3AllowOnly
+
+  # Load Balancer
+  LBSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to our load balancer
+      VpcId: 
+        Fn::ImportValue: 
+          !Sub ${EnvironmentName}-VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  ElasticLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Subnets:
+        Fn::Split: 
+          - ","
+          - Fn::ImportValue: !Sub ${EnvironmentName}-PUB-NETS
+      SecurityGroups:
+        - !Ref LBSecGroup
+
+  LBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ElasticLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebAppTargetGroup
+
+  WebAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      TargetType: instance
+      HealthCheckIntervalSeconds: 25
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      UnhealthyThresholdCount: 5
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      VpcId: 
+        Fn::ImportValue: !Sub ${EnvironmentName}-VPCID
+
+  # EC2 & Auto Scaling Group
+  WebServerSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to our hosts and SSH from local only
+      VpcId:
+        Fn::ImportValue: 
+          !Sub ${EnvironmentName}-VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+
+  WebAppLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub ${EnvironmentName}-launch-template
+      LaunchTemplateData:
+        ImageId: !Ref Ami
+        InstanceType: !Ref InstanceType
+        BlockDeviceMappings:
+          - DeviceName: "/dev/xvda"
+            Ebs:
+              VolumeSize: 10
+        SecurityGroupIds:
+          - !Ref WebServerSecGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            sudo apt update -y
+            sudo apt install apache2 -y
+            sudo systemctl start apache2
+            sudo systemctl enable apache2
+            cd /var/www/html
+            echo "it works! Udagram, Udacity" > index.html
+
+  WebAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: "ec2-autoscaling-group"
+      HealthCheckGracePeriod: 10
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebAppLaunchTemplate
+        Version: !GetAtt WebAppLaunchTemplate.LatestVersionNumber
+      MaxSize: '5'
+      MinSize: '3'
+      VPCZoneIdentifier:
+        Fn::Split:
+          - ","
+          - Fn::ImportValue: !Sub ${EnvironmentName}-PRIV-NETS
+      TargetGroupARNs:
+        - !GetAtt WebAppTargetGroup.TargetGroupArn
+        
+Outputs:
+  LoadBalancerEndpoint:
+    Description: Load balancer endpoint
+    Value: !GetAtt ElasticLoadBalancer.DNSName
+    Export:
+      Name: !Sub ${EnvironmentName}-LoadBalancerDNS
+      
+  WebsiteURL:
+    Value: !Join [ "", [ "http://", !GetAtt ElasticLoadBalancer.DNSName ] ]
+    Description: Application URL

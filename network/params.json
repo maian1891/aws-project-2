@@ -1,0 +1,10 @@
+[
+	{
+		"ParameterKey": "EnvironmentName",
+		"ParameterValue": "Anmt2-Aws-Cloud-Project-2"
+	},
+	{
+		"ParameterKey": "VpcCIDR",
+		"ParameterValue": "10.0.0.0/16"
+	}
+]
